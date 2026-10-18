@@ -10,3 +10,4 @@ process.env.JWT_REFRESH_SECRET = 'test-refresh-secret';
 process.env.DISABLE_THROTTLE = 'true';
 process.env.WEB_ORIGIN = 'http://localhost:3000';
 process.env.UPLOADS_DIR = join(tmpdir(), `koma-test-uploads-${process.pid}`);
+process.env.DISABLE_JOBS = 'true';

@@ -8,7 +8,7 @@ Estimates are for one full-time developer. Status: â˜ todo, âœ… done.
 | 1 ✅ | Auth & users | Register/login, JWT + refresh cookie, roles (customer/admin/staff), profile, addresses | 1 wk |
 | 2 ✅ | Catalog | Categories, products, variants, images upload, listing, filters, search, product page, SEO | 1.5 wk |
 | 3 ✅ | Inventory | Locations (shop/warehouse), stock levels, reservation logic, barcode lookup, admin stock adjust | 1 wk |
-| 4 | Cart & checkout | Guest + user cart, address, pincode check, order creation, GST breakdown, COD, click & collect | 1.5 wk |
+| 4 ✅ | Cart & checkout | Guest + user cart, address, pincode check, order creation, GST breakdown, click & collect (COD stays off: prepaid only) | 1.5 wk |
 | 5 | Payments | Razorpay order + webhook, expiry job, refunds, confirmation email | 1 wk |
 | 6 | Admin panel | Product/order management, status updates, stock, dashboard | 1.5 wk |
 | 7 | Shipping | Shiprocket: rates, shipment creation, AWB, tracking updates, GST invoice PDF | 1 wk |

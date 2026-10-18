@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "Cart" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN     "expiresAt" TIMESTAMP(3),
+ADD COLUMN     "tax" JSONB NOT NULL DEFAULT '{}';
