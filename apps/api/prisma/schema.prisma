@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// All money values are integers in paise (₹1 = 100 paise).
+// Prices are GST-inclusive (MRP style); gstRate is used to split tax on invoices.
+
+enum Role {
+  CUSTOMER
+  ADMIN
+  STAFF // store staff
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum OrderChannel {
+  ONLINE
+  STORE // POS / walk-in, added in a later phase
+}
+
+enum FulfilmentType {
+  SHIP
+  STORE_PICKUP
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PACKED
+  SHIPPED
+  READY_FOR_PICKUP
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  ONLINE // Razorpay: UPI, cards, netbanking, wallets
+  COD
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String?   @unique
+  phone        String?   @unique // Indian mobile, +91
+  name         String
+  passwordHash String
+  role         Role      @default(CUSTOMER)
+  tokenVersion Int       @default(0) // bump to invalidate all refresh tokens
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  addresses    Address[]
+  orders       Order[]
+  cart         Cart?
+  reviews      Review[]
+}
+
+model Address {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  phone     String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  pincode   String // 6 digits
+  isDefault Boolean @default(false)
+
+  @@index([userId])
+}
+
+model Category {
+  id       String     @id @default(cuid())
+  name     String
+  slug     String     @unique
+  parentId String?
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+}
+
+model Product {
+  id          String           @id @default(cuid())
+  title       String
+  slug        String           @unique
+  description String
+  brand       String?
+  hsnCode     String? // HSN code for GST invoicing
+  gstRate     Int              @default(18) // percent: 0, 5, 12, 18, 28
+  status      ProductStatus    @default(DRAFT)
+  minPrice    Int              @default(0) // paise, lowest variant price; kept in sync by the catalog service
+  categoryId  String
+  category    Category         @relation(fields: [categoryId], references: [id])
+  variants    ProductVariant[]
+  images      ProductImage[]
+  reviews     Review[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([categoryId, status])
+  @@index([status, minPrice])
+  @@index([status, createdAt])
+}
+
+model ProductVariant {
+  id           String             @id @default(cuid())
+  productId    String
+  product      Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku          String             @unique
+  barcode      String?            @unique // matches the barcode used in the physical store
+  mrp          Int // paise
+  price        Int // paise, selling price
+  attributes   Json // { "size": "M", "colour": "Black" }
+  stock        StockLevel[]
+  movements    StockMovement[]
+  reservations StockReservation[]
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+
+  @@index([productId])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  position  Int     @default(0)
+
+  @@index([productId])
+}
+
+// One row per variant per location, so the shop and the online store share one inventory.
+model Location {
+  id           String             @id @default(cuid())
+  name         String
+  isStore      Boolean            @default(true) // false = warehouse
+  address      String
+  pincode      String
+  active       Boolean            @default(true) // inactive locations are ignored for availability and new reservations
+  stock        StockLevel[]
+  orders       Order[]            @relation("PickupLocation")
+  movements    StockMovement[]
+  reservations StockReservation[]
+}
+
+model StockLevel {
+  id         String         @id @default(cuid())
+  variantId  String
+  variant    ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  locationId String
+  location   Location       @relation(fields: [locationId], references: [id])
+  onHand     Int            @default(0)
+  reserved   Int            @default(0) // held by unpaid / unshipped online orders
+
+  @@unique([variantId, locationId])
+}
+
+enum StockMovementType {
+  RECEIVE
+  ADJUSTMENT
+  COUNT
+  SALE
+  TRANSFER_OUT
+  TRANSFER_IN
+}
+
+enum AdjustReason {
+  DAMAGED
+  LOST
+  FOUND
+  CORRECTION
+  RETURN
+}
+
+enum ReservationStatus {
+  ACTIVE
+  COMMITTED
+  RELEASED
+}
+
+// Append-only history of every change to onHand.
+model StockMovement {
+  id           String            @id @default(cuid())
+  variantId    String
+  variant      ProductVariant    @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  locationId   String
+  location     Location          @relation(fields: [locationId], references: [id])
+  type         StockMovementType
+  quantity     Int // signed change to onHand
+  balanceAfter Int // onHand after this movement
+  reason       AdjustReason?
+  note         String?
+  userId       String? // staff member who made the change
+  orderId      String?
+  createdAt    DateTime          @default(now())
+
+  @@index([variantId, createdAt])
+  @@index([locationId, createdAt])
+}
+
+// Stock held for an order. ACTIVE holds count against StockLevel.reserved.
+model StockReservation {
+  id         String            @id @default(cuid())
+  orderId    String
+  order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId  String
+  variant    ProductVariant    @relation(fields: [variantId], references: [id])
+  locationId String
+  location   Location          @relation(fields: [locationId], references: [id])
+  quantity   Int
+  status     ReservationStatus @default(ACTIVE)
+  expiresAt  DateTime
+  createdAt  DateTime          @default(now())
+
+  @@index([orderId])
+  @@index([status, expiresAt])
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String?    @unique
+  user      User?      @relation(fields: [userId], references: [id])
+  items     CartItem[]
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String         @id @default(cuid())
+  cartId    String
+  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  quantity  Int
+
+  @@unique([cartId, variantId])
+}
+
+model Order {
+  id               String             @id @default(cuid())
+  number           Int                @unique @default(autoincrement())
+  userId           String
+  user             User               @relation(fields: [userId], references: [id])
+  channel          OrderChannel       @default(ONLINE)
+  fulfilment       FulfilmentType     @default(SHIP)
+  pickupLocationId String?
+  pickupLocation   Location?          @relation("PickupLocation", fields: [pickupLocationId], references: [id])
+  status           OrderStatus        @default(PENDING)
+  paymentMethod    PaymentMethod
+  subtotal         Int // paise
+  discount         Int                @default(0)
+  shippingFee      Int                @default(0)
+  total            Int // paise
+  shippingAddress  Json // snapshot at order time
+  items            OrderItem[]
+  payments         Payment[]
+  shipment         Shipment?
+  reservations     StockReservation[]
+  couponId         String?
+  coupon           Coupon?            @relation(fields: [couponId], references: [id])
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model OrderItem {
+  id        String         @id @default(cuid())
+  orderId   String
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  title     String // snapshots, so later edits do not change past orders
+  sku       String
+  hsnCode   String?
+  gstRate   Int
+  unitPrice Int // paise, GST-inclusive
+  quantity  Int
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id])
+  provider          String        @default("razorpay")
+  providerOrderId   String?       @unique // Razorpay order_id
+  providerPaymentId String?       @unique // Razorpay payment_id
+  amount            Int // paise
+  status            PaymentStatus @default(CREATED)
+  createdAt         DateTime      @default(now())
+
+  @@index([orderId])
+}
+
+// Deduplicates provider webhooks.
+model WebhookEvent {
+  id         String   @id // provider event id
+  provider   String
+  receivedAt DateTime @default(now())
+}
+
+model Shipment {
+  id          String    @id @default(cuid())
+  orderId     String    @unique
+  order       Order     @relation(fields: [orderId], references: [id])
+  carrier     String? // e.g. via Shiprocket
+  awb         String? // tracking number
+  trackUrl    String?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+}
+
+model Coupon {
+  id         String    @id @default(cuid())
+  code       String    @unique
+  percentOff Int?
+  flatOff    Int? // paise
+  minOrder   Int       @default(0)
+  expiresAt  DateTime?
+  active     Boolean   @default(true)
+  orders     Order[]
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  rating    Int
+  body      String?
+  createdAt DateTime @default(now())
+
+  @@unique([productId, userId])
+}

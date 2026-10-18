@@ -1,0 +1,15 @@
+{
+  "name": "koma",
+  "private": true,
+  "packageManager": "pnpm@10.21.0",
+  "scripts": {
+    "dev:api": "pnpm --filter api dev",
+    "dev:web": "pnpm --filter web dev",
+    "build": "pnpm -r build",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter api prisma:migrate",
+    "db:studio": "pnpm --filter api prisma:studio",
+    "test": "pnpm --filter api test:all && pnpm --filter web test"
+  }
+}
