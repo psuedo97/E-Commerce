@@ -322,6 +322,116 @@ describe('Stock reservations', () => {
     });
   });
 
+  describe('a failed reservation cleans up after itself', () => {
+    it('leaves nothing held even when the caller catches the error and keeps using the same transaction', async () => {
+      const ok = await createVariant(prisma);
+      const short = await createVariant(prisma);
+      await setStock(prisma, ok.id, storeA.id, 10);
+      await setStock(prisma, short.id, storeA.id, 1);
+      const orderId = await createOrder(prisma);
+
+      await prisma.$transaction(async (tx) => {
+        await expect(
+          svc.reserve(orderId, [{ variantId: ok.id, quantity: 4 }, { variantId: short.id, quantity: 2 }], { tx }),
+        ).rejects.toBeInstanceOf(ConflictException);
+        // still inside the transaction: the units the attempt grabbed for the good item are already back
+        const during = await tx.stockLevel.findUniqueOrThrow({ where: { variantId_locationId: { variantId: ok.id, locationId: storeA.id } } });
+        expect(during.reserved).toBe(0);
+      });
+
+      expect((await level(ok.id, storeA.id)).reserved).toBe(0);
+      expect((await level(short.id, storeA.id)).reserved).toBe(0);
+      expect(await prisma.stockReservation.count({ where: { orderId } })).toBe(0);
+    });
+
+    it('also gives back units claimed from several locations for one item', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 3);
+      await setStock(prisma, v.id, storeB.id, 3);
+      const orderId = await createOrder(prisma);
+      await prisma.$transaction(async (tx) => {
+        await expect(svc.reserve(orderId, [{ variantId: v.id, quantity: 9 }], { tx })).rejects.toBeInstanceOf(ConflictException);
+      });
+      expect(await totalReserved(v.id)).toBe(0);
+    });
+
+    it('a later successful reservation in the same transaction still works', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 5);
+      const failing = await createOrder(prisma);
+      const succeeding = await createOrder(prisma);
+      await prisma.$transaction(async (tx) => {
+        await expect(svc.reserve(failing, [{ variantId: v.id, quantity: 9 }], { tx })).rejects.toBeInstanceOf(ConflictException);
+        await svc.reserve(succeeding, [{ variantId: v.id, quantity: 5 }], { tx }); // all 5 are still available
+      });
+      expect((await level(v.id, storeA.id)).reserved).toBe(5);
+    });
+  });
+
+  describe('extend', () => {
+    const expiry = async (orderId: string) => (await prisma.stockReservation.findFirstOrThrow({ where: { orderId } })).expiresAt;
+
+    it('pushes a hold out to a later time', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 10);
+      const orderId = await createOrder(prisma);
+      await svc.reserve(orderId, [{ variantId: v.id, quantity: 2 }], { ttlMinutes: 5 });
+      const until = new Date(Date.now() + 60 * 60_000);
+
+      expect(await svc.extend(orderId, until)).toBe(1);
+      expect((await expiry(orderId)).getTime()).toBe(until.getTime());
+    });
+
+    it('never shortens a hold', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 10);
+      const orderId = await createOrder(prisma);
+      await svc.reserve(orderId, [{ variantId: v.id, quantity: 2 }], { ttlMinutes: 30 });
+      const before = await expiry(orderId);
+
+      expect(await svc.extend(orderId, new Date(Date.now() + 5 * 60_000))).toBe(0);
+      expect((await expiry(orderId)).getTime()).toBe(before.getTime());
+    });
+
+    it('extends every location an order is split across', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 3);
+      await setStock(prisma, v.id, storeB.id, 4);
+      const orderId = await createOrder(prisma);
+      await svc.reserve(orderId, [{ variantId: v.id, quantity: 6 }], { ttlMinutes: 5 });
+      expect(await svc.extend(orderId, new Date(Date.now() + 60 * 60_000))).toBe(2);
+    });
+
+    it('does nothing for released or committed holds, and leaves other orders alone', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 10);
+      const released = await createOrder(prisma);
+      const committed = await createOrder(prisma);
+      const other = await createOrder(prisma);
+      await svc.reserve(released, [{ variantId: v.id, quantity: 1 }], { ttlMinutes: 5 });
+      await svc.reserve(committed, [{ variantId: v.id, quantity: 1 }], { ttlMinutes: 5 });
+      await svc.reserve(other, [{ variantId: v.id, quantity: 1 }], { ttlMinutes: 5 });
+      await svc.release(released);
+      await svc.commit(committed);
+      const otherBefore = await expiry(other);
+
+      const until = new Date(Date.now() + 60 * 60_000);
+      expect(await svc.extend(released, until)).toBe(0);
+      expect(await svc.extend(committed, until)).toBe(0);
+      expect((await expiry(other)).getTime()).toBe(otherBefore.getTime());
+    });
+
+    it('keeps an extended hold safe from the expiry sweep', async () => {
+      const v = await createVariant(prisma);
+      await setStock(prisma, v.id, storeA.id, 10);
+      const orderId = await createOrder(prisma);
+      await svc.reserve(orderId, [{ variantId: v.id, quantity: 2 }], { ttlMinutes: -1 }); // already expired
+      await svc.extend(orderId, new Date(Date.now() + 20 * 60_000));
+      expect(await svc.releaseExpired()).not.toContain(orderId);
+      expect((await level(v.id, storeA.id)).reserved).toBe(2);
+    });
+  });
+
   describe('releaseExpired', () => {
     it('frees holds past their expiry and returns the order ids', async () => {
       const v = await createVariant(prisma);

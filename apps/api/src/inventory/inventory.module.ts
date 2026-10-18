@@ -8,6 +8,6 @@ import { StoresController } from './stores.controller';
 @Module({
   controllers: [InventoryController, StoresController],
   providers: [InventoryService, LocationsService, ReservationService],
-  exports: [ReservationService], // used by checkout in Phase 4
+  exports: [ReservationService, InventoryService], // used by checkout and payments
 })
 export class InventoryModule {}

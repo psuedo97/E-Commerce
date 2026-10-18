@@ -4,10 +4,23 @@ import { PrismaClient, Role } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
+import { Mailer, MAILER } from '../src/mail/mailer';
+import { PAYMENT_GATEWAY, PaymentGateway } from '../src/payments/gateway';
+import { FakeGateway, FakeMailer } from './fakes';
 
-export async function createTestApp() {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  const app = moduleRef.createNestApplication<NestExpressApplication>();
+export interface TestAppOptions {
+  gateway?: PaymentGateway;
+  mailer?: Mailer;
+}
+
+/** The app as the tests see it: real HTTP setup, but a controllable payment gateway and a silent mailer. */
+export async function createTestApp(opts: TestAppOptions = {}) {
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(PAYMENT_GATEWAY).useValue(opts.gateway ?? new FakeGateway())
+    .overrideProvider(MAILER).useValue(opts.mailer ?? new FakeMailer())
+    .compile();
+  // rawBody: webhooks are verified against the exact bytes the provider sent.
+  const app = moduleRef.createNestApplication<NestExpressApplication>({ rawBody: true });
   configureApp(app);
   await app.init();
   return app;
@@ -129,6 +142,43 @@ export async function createOrder(prisma: PrismaClient) {
     data: { userId: user.id, paymentMethod: 'ONLINE', subtotal: 0, total: 0, shippingAddress: {} },
   });
   return order.id;
+}
+
+/**
+ * A customer with a genuinely placed, unpaid order (made through the real cart and checkout endpoints),
+ * with its stock held. Starting point for the payment tests.
+ */
+export async function placePendingOrder(
+  app: NestExpressApplication,
+  prisma: PrismaClient,
+  opts: { quantity?: number; price?: number; stock?: number; pickup?: boolean } = {},
+) {
+  const token = await registerCustomer(app);
+  const auth = (r: request.Test) => r.set('Authorization', `Bearer ${token}`);
+  const server = () => request(app.getHttpServer());
+  const me = (await auth(server().get('/api/v1/users/me')).expect(200)).body;
+
+  const shop =
+    (await prisma.location.findFirst({ where: { isStore: true, active: true } })) ??
+    (await createLocation(prisma, 'Payments Shop'));
+  const variant = await createVariant(prisma, { price: opts.price ?? 59900, gstRate: 5, hsnCode: '6109' });
+  await setStock(prisma, variant.id, shop.id, opts.stock ?? 20);
+
+  await auth(server().post('/api/v1/cart/items')).send({ variantId: variant.id, quantity: opts.quantity ?? 1 }).expect(201);
+
+  let body: Record<string, unknown>;
+  if (opts.pickup) {
+    body = { fulfilment: 'STORE_PICKUP', pickupLocationId: shop.id, contactPhone: '9876500000' };
+  } else {
+    const address = (
+      await auth(server().post('/api/v1/users/me/addresses'))
+        .send({ name: 'Asha Rawat', phone: '9876543210', line1: '12 Rajpur Road', city: 'Dehradun', state: 'Uttarakhand', pincode: '248001' })
+        .expect(201)
+    ).body;
+    body = { fulfilment: 'SHIP', addressId: address.id };
+  }
+  const order = (await auth(server().post('/api/v1/checkout')).send(body).expect(201)).body;
+  return { token, userId: me.id as string, email: me.email as string, variant, shop, order };
 }
 
 /** Smallest valid PNG (1x1 pixel). */
