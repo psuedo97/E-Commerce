@@ -241,6 +241,7 @@ model Cart {
   userId    String?    @unique
   user      User?      @relation(fields: [userId], references: [id])
   items     CartItem[]
+  createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
 
@@ -249,7 +250,7 @@ model CartItem {
   cartId    String
   cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
   variantId String
-  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
   quantity  Int
 
   @@unique([cartId, variantId])
@@ -271,6 +272,8 @@ model Order {
   shippingFee      Int                @default(0)
   total            Int // paise
   shippingAddress  Json // snapshot at order time
+  tax              Json               @default("{}") // GST breakdown snapshot: placeOfSupply, taxableValue, cgst, sgst, igst, totalTax
+  expiresAt        DateTime? // unpaid orders are cancelled and stock released after this
   items            OrderItem[]
   payments         Payment[]
   shipment         Shipment?

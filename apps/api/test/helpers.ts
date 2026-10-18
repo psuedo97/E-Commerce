@@ -84,17 +84,22 @@ export async function seedCatalog(prisma: PrismaClient) {
 export const staffToken = (app: NestExpressApplication, prisma: PrismaClient) => adminToken(app, prisma, 'STAFF');
 
 /** A product with one variant (no stock yet). Returns the variant. */
-export async function createVariant(prisma: PrismaClient, over: { sku?: string; barcode?: string; title?: string } = {}) {
+export async function createVariant(
+  prisma: PrismaClient,
+  over: { sku?: string; barcode?: string; title?: string; price?: number; gstRate?: number; hsnCode?: string } = {},
+) {
   const n = ++counter;
+  const price = over.price ?? 50000;
   const category = await prisma.category.upsert({
     where: { slug: 'inventory-tests' }, update: {}, create: { name: 'Inventory Tests', slug: 'inventory-tests' },
   });
   const product = await prisma.product.create({
     data: {
       title: over.title ?? `Inventory Product ${n}`, slug: `inventory-product-${n}`, description: 'For inventory tests',
-      status: 'ACTIVE', categoryId: category.id, minPrice: 50000,
+      status: 'ACTIVE', categoryId: category.id, minPrice: price,
+      gstRate: over.gstRate ?? 18, hsnCode: over.hsnCode,
       variants: {
-        create: [{ sku: over.sku ?? `INV-${n}`, barcode: over.barcode, mrp: 60000, price: 50000, attributes: { size: 'M' } }],
+        create: [{ sku: over.sku ?? `INV-${n}`, barcode: over.barcode, mrp: price + 10000, price, attributes: { size: 'M' } }],
       },
     },
     include: { variants: true },

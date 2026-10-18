@@ -1,6 +1,5 @@
 // Server-side calls use API_URL; image URLs are opened by the browser, so they use the public origin.
 const API_URL = process.env.API_URL ?? 'http://localhost:4000/api/v1';
-const PUBLIC_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN ?? 'http://localhost:4000';
 
 export type ProductListItem = {
   id: string; title: string; slug: string; brand: string | null;
@@ -33,19 +32,4 @@ export async function api<T>(path: string): Promise<T | null> {
   }
 }
 
-/** Paise to rupees, Indian digit grouping: 189900 -> "Rs 1,899" style with the rupee sign. */
-export function formatINR(paise: number): string {
-  const rupees = paise / 100;
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency', currency: 'INR', minimumFractionDigits: Number.isInteger(rupees) ? 0 : 2,
-  }).format(rupees);
-}
-
-export function imageUrl(url: string | null): string | null {
-  if (!url) return null;
-  return url.startsWith('http') ? url : `${PUBLIC_ORIGIN}${url}`;
-}
-
-export function discountPercent(mrp: number, price: number): number {
-  return mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
-}
+export { discountPercent, formatINR, imageUrl } from './format';

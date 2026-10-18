@@ -10,6 +10,7 @@
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter api prisma:migrate",
     "db:studio": "pnpm --filter api prisma:studio",
-    "test": "pnpm --filter api test:all && pnpm --filter web test"
+    "test": "pnpm --filter api test:all && pnpm --filter web test",
+    "test:browser": "pnpm --filter web test:browser"
   }
 }
