@@ -47,3 +47,21 @@ export type Quote = {
 export type CheckoutRequest =
   | { fulfilment: 'SHIP'; addressId: string }
   | { fulfilment: 'STORE_PICKUP'; pickupLocationId: string; contactPhone?: string };
+
+/** What POST /orders/:id/pay returns: everything needed to open the payment window. */
+export type PayInit = {
+  provider: 'razorpay' | 'mock';
+  keyId: string;
+  providerOrderId: string;
+  amount: number; // paise
+  currency: 'INR';
+  orderId: string;
+  orderNumber: number;
+  expiresAt: string | null;
+  prefill: { name: string; email: string | null; contact: string | null };
+};
+
+/** paid: confirmed now. already_paid: confirmed earlier. refund_queued: items sold out meanwhile, money goes back. */
+export type PaymentOutcome = 'paid' | 'already_paid' | 'refund_queued' | 'ignored' | 'failed';
+
+export type PaymentResult = { outcome: PaymentOutcome; order: Order };

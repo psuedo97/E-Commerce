@@ -116,8 +116,7 @@ export default function CheckoutPage() {
       <h1>Checkout</h1>
 
       <p className="notice">
-        Online payment is not switched on yet. An order placed now holds your items for 30 minutes and is then
-        cancelled automatically.
+        After you place your order we hold your items for 30 minutes while you pay on the next page.
       </p>
 
       <div className="checkout-grid">

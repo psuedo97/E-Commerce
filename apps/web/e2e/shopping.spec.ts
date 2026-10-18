@@ -1,41 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-
-let counter = 0;
-const uniqueEmail = () => `shopper${Date.now()}${++counter}@example.com`;
-const PASSWORD = 'password123';
-
-async function register(page: Page, opts: { next?: string; name?: string; phone?: string } = {}) {
-  const email = uniqueEmail();
-  await page.goto(`/register${opts.next ? `?next=${encodeURIComponent(opts.next)}` : ''}`);
-  await page.getByLabel('Full name').fill(opts.name ?? 'Asha Rawat');
-  await page.getByLabel('Email').fill(email);
-  if (opts.phone) await page.getByLabel(/Mobile number/).fill(opts.phone);
-  await page.getByLabel(/^Password/).fill(PASSWORD);
-  await page.getByRole('button', { name: 'Create account' }).click();
-  // Registration is asynchronous: wait for the signed-in header so the next step cannot interrupt it.
-  await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
-  return email;
-}
-
-async function addTeeToCart(page: Page, size = 'M') {
-  await page.goto('/products/e2e-tee');
-  await page.getByRole('button', { name: size, exact: true }).click();
-  await page.getByRole('button', { name: 'Add to cart' }).click();
-  await expect(page.getByText('Added to your cart.')).toBeVisible();
-}
-
-async function addAddress(page: Page, over: { state?: string; city?: string; pincode?: string } = {}) {
-  await page.getByRole('button', { name: /Add (a delivery|another) address/ }).click();
-  await page.getByLabel('Mobile number').fill('9876543210');
-  await page.getByLabel('Address line 1').fill('12 Rajpur Road');
-  await page.getByLabel('City').fill(over.city ?? 'Dehradun');
-  await page.getByLabel('Pincode').fill(over.pincode ?? '248001');
-  await page.getByLabel('State').selectOption(over.state ?? 'Uttarakhand');
-  await page.getByRole('button', { name: 'Save address' }).click();
-}
-
-const formError = (page: Page) => page.locator('p.error-text[role="alert"]');
-const cartLink = (page: Page) => page.getByRole('link', { name: /^Cart/ });
+import { expect, test } from '@playwright/test';
+import { addAddress, addTeeToCart, cartLink, formError, PASSWORD, register, uniqueEmail } from './helpers';
 
 test.describe('browsing and the cart', () => {
   test('product page shows price, sizes and disables a sold-out size', async ({ page }) => {

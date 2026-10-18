@@ -173,6 +173,28 @@ export class InventoryService {
     });
   }
 
+  /**
+   * Puts an order's sold units back on the shelf (full refund of an order that was never shipped).
+   * Reverses each SALE movement at its own location and logs a RETURN adjustment. Runs inside the
+   * caller's transaction. Returns units restocked; 0 if the order had no sales or was already restocked.
+   */
+  async restockOrder(tx: Tx, orderId: string, userId?: string): Promise<number> {
+    const already = await tx.stockMovement.count({ where: { orderId, type: 'ADJUSTMENT', reason: 'RETURN' } });
+    if (already > 0) return 0;
+    const sales = await tx.stockMovement.findMany({ where: { orderId, type: 'SALE' } });
+    let units = 0;
+    for (const s of sales) {
+      const qty = -s.quantity; // SALE movements are negative
+      const balance = await this.increase(tx, s.variantId, s.locationId, qty);
+      await this.record(tx, {
+        variantId: s.variantId, locationId: s.locationId, type: 'ADJUSTMENT', quantity: qty,
+        balanceAfter: balance, reason: 'RETURN', note: 'Order refunded and restocked', userId, orderId,
+      });
+      units += qty;
+    }
+    return units;
+  }
+
   // ---------- helpers ----------
 
   private async increase(tx: Tx, variantId: string, locationId: string, qty: number): Promise<number> {

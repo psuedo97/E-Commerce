@@ -134,3 +134,8 @@ a.btn { display: inline-block; text-decoration: none; }
   .order-row { grid-template-columns: 1fr 1fr; }
   .nav { gap: 10px; }
 }
+
+/* ---- payments ---- */
+.pay-panel { margin-top: 12px; }
+.test-mode { border: 2px dashed #c8a400; background: #fffbe6; border-radius: 8px; padding: 12px; }
+.ok-banner { background: #e6f6ec; border: 1px solid #b5e0c5; color: #1b7a43; border-radius: 6px; padding: 10px 14px; }

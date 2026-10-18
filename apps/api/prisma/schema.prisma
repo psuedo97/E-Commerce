@@ -274,6 +274,7 @@ model Order {
   shippingAddress  Json // snapshot at order time
   tax              Json               @default("{}") // GST breakdown snapshot: placeOfSupply, taxableValue, cgst, sgst, igst, totalTax
   expiresAt        DateTime? // unpaid orders are cancelled and stock released after this
+  paidAt           DateTime?
   items            OrderItem[]
   payments         Payment[]
   shipment         Shipment?
@@ -310,9 +311,39 @@ model Payment {
   providerPaymentId String?       @unique // Razorpay payment_id
   amount            Int // paise
   status            PaymentStatus @default(CREATED)
+  refundedAmount    Int           @default(0) // paise refunded so far
+  failureReason     String?
+  refunds           Refund[]
   createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @default(now()) @updatedAt
 
   @@index([orderId])
+}
+
+enum RefundStatus {
+  PENDING // requested, not yet confirmed by the payment provider (retried automatically)
+  PROCESSED
+  FAILED // gave up after repeated attempts; needs manual action
+}
+
+model Refund {
+  id               String       @id @default(cuid())
+  paymentId        String
+  payment          Payment      @relation(fields: [paymentId], references: [id])
+  orderId          String
+  amount           Int // paise
+  status           RefundStatus @default(PENDING)
+  reason           String
+  providerRefundId String?      @unique
+  attempts         Int          @default(0)
+  claimedAt        DateTime? // lease so two workers never send the same refund
+  lastError        String?
+  requestedBy      String? // admin user id; null for automatic refunds
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @default(now()) @updatedAt
+
+  @@index([paymentId])
+  @@index([status, claimedAt])
 }
 
 // Deduplicates provider webhooks.

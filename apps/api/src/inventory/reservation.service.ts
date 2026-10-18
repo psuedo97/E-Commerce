@@ -46,6 +46,7 @@ export class ReservationService {
       const expiresAt = new Date(Date.now() + (opts.ttlMinutes ?? 30) * 60_000);
       const holds: Prisma.StockReservationCreateManyInput[] = [];
       const shortages: Shortage[] = [];
+      const claims: { levelId: string; quantity: number }[] = []; // so a failed attempt can undo itself
 
       // Fixed order avoids deadlocks between two orders reserving the same variants.
       for (const variantId of [...wanted.keys()].sort()) {
@@ -65,6 +66,7 @@ export class ReservationService {
               UPDATE "StockLevel" SET reserved = reserved + ${take}
               WHERE id = ${level.id} AND "onHand" - reserved >= ${take}`;
             if (claimed === 1) {
+              claims.push({ levelId: level.id, quantity: take });
               holds.push({ orderId, variantId, locationId: level.locationId, quantity: take, expiresAt });
               remaining -= take;
               if (remaining === 0) break;
@@ -75,7 +77,11 @@ export class ReservationService {
       }
 
       if (shortages.length > 0) {
-        // Throwing rolls back the holds taken above (they live in this transaction).
+        // Undo our own claims, so this is all-or-nothing even when the caller catches the error and
+        // carries on inside the same transaction (a late payment trying to win its stock back).
+        for (const c of claims) {
+          await tx.$executeRaw`UPDATE "StockLevel" SET reserved = reserved - ${c.quantity} WHERE id = ${c.levelId}`;
+        }
         throw new ConflictException({ message: 'Insufficient stock', shortages });
       }
       await tx.stockReservation.createMany({ data: holds });
@@ -131,6 +137,19 @@ export class ReservationService {
       }
       return units;
     });
+  }
+
+  /**
+   * Pushes an order's active holds out to `until` (never earlier than they already are). Used while a
+   * customer is paying, so the hold cannot expire mid-payment. Returns how many holds were extended.
+   */
+  async extend(orderId: string, until: Date, tx?: Tx): Promise<number> {
+    const db = tx ?? this.prisma;
+    const { count } = await db.stockReservation.updateMany({
+      where: { orderId, status: 'ACTIVE', expiresAt: { lt: until } },
+      data: { expiresAt: until },
+    });
+    return count;
   }
 
   /** Releases every hold past its expiry. Returns the affected order ids so the caller can cancel them. */

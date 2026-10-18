@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import OrderSummary from '../../../components/OrderSummary';
+import PayPanel from '../../../components/PayPanel';
 import { useSession } from '../../../components/Providers';
 import { ApiError, client } from '../../../lib/client';
 import { formatINR } from '../../../lib/format';
@@ -62,8 +63,19 @@ export default function OrderPage() {
 
       {order.status === 'PENDING' && (
         <p className="notice">
-          Your items are held for {left} more minute{left === 1 ? '' : 's'}. Online payment is not switched on yet, so
-          this order will be cancelled automatically when the time runs out.
+          {left === 0
+            ? 'The time to pay for this order has run out. It will be cancelled shortly. You can place a new order.'
+            : `Your items are held for ${left} more minute${left === 1 ? '' : 's'}. Complete payment to confirm your order.`}
+        </p>
+      )}
+      {order.status === 'PAID' && (
+        <p className="ok-banner">Payment received. We have emailed your confirmation and will update you as your order moves along.</p>
+      )}
+      {order.status === 'REFUNDED' && <p className="notice">This order has been refunded.</p>}
+      {order.status === 'CANCELLED' && (order.payment?.status === 'CAPTURED' || order.payment?.status === 'REFUNDED') && (
+        <p className="notice" data-testid="sold-out-refund">
+          Sorry, these items sold out while your payment was being completed. Your payment of {formatINR(order.total)} is
+          being refunded and should reach your account within 5 to 7 working days.
         </p>
       )}
       {error && <p className="error-text" role="alert">{error}</p>}
@@ -99,6 +111,9 @@ export default function OrderPage() {
         <aside className="summary">
           <h2>Payment summary</h2>
           <OrderSummary subtotal={order.subtotal} shippingFee={order.shippingFee} total={order.total} tax={order.tax} discount={order.discount} />
+          {order.status === 'PENDING' && left !== 0 && order.paymentMethod === 'ONLINE' && (
+            <PayPanel order={order} onOrderChange={setOrder} />
+          )}
           {canCancel(order.status) && (
             <button className="btn secondary block" disabled={cancelling} onClick={cancel}>
               {cancelling ? 'Cancelling...' : 'Cancel order'}
